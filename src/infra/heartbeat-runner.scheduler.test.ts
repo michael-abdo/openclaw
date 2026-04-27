@@ -257,6 +257,33 @@ describe("startHeartbeatRunner", () => {
     runner.stop();
   });
 
+  it("clamps very long heartbeat intervals to avoid setTimeout overflow", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(0));
+
+    // Capture all setTimeout delays scheduled during runner lifetime.
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    const runner = startHeartbeatRunner({
+      cfg: {
+        agents: { defaults: { heartbeat: { every: "99999h" } } },
+      } as OpenClawConfig,
+      runOnce: runSpy,
+    });
+
+    // Every scheduled delay must fit in a 32-bit signed int.
+    const MAX_SAFE_TIMEOUT = 2_147_483_647;
+    for (const call of setTimeoutSpy.mock.calls) {
+      const delay = call[1];
+      if (typeof delay === "number") {
+        expect(delay).toBeLessThanOrEqual(MAX_SAFE_TIMEOUT);
+      }
+    }
+
+    runner.stop();
+  });
+
   it("does not fan out to unrelated agents for session-scoped exec wakes", async () => {
     useFakeHeartbeatTime();
     const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });

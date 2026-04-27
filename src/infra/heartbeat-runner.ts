@@ -1008,7 +1008,12 @@ export function startHeartbeatRunner(opts: {
     if (!Number.isFinite(nextDue)) {
       return;
     }
-    const delay = Math.max(0, nextDue - now);
+    // Clamp to Node.js max safe timeout (2^31-1 ms ≈ 24.8 days). Without this,
+    // long heartbeat intervals (e.g. "99999h") overflow setTimeout's 32-bit
+    // limit, Node clamps to 1 ms, the timer fires immediately, scheduleNext
+    // recomputes the same overflow value → 100% CPU hot loop with TimeoutOverflowWarning spam.
+    const MAX_SAFE_TIMEOUT = 2_147_483_647;
+    const delay = Math.min(MAX_SAFE_TIMEOUT, Math.max(0, nextDue - now));
     state.timer = setTimeout(() => {
       state.timer = null;
       requestHeartbeatNow({ reason: "interval", coalesceMs: 0 });
