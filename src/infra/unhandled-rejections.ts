@@ -195,6 +195,14 @@ export function isTransientNetworkError(err: unknown): boolean {
   return false;
 }
 
+function isPlaywrightServiceWorkerError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const msg = ((err as { message?: string }).message ?? "").toLowerCase();
+  return msg.includes("service_worker") && msg.includes("targetinfo");
+}
+
 export function registerUnhandledRejectionHandler(handler: UnhandledRejectionHandler): () => void {
   handlers.add(handler);
   return () => {
@@ -246,6 +254,15 @@ export function installUnhandledRejectionHandler(): void {
     if (isTransientNetworkError(reason)) {
       console.warn(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
+        formatUncaughtError(reason),
+      );
+      return;
+    }
+
+    // Playwright asserts when Chrome attaches to a service_worker CDP target — not actionable.
+    if (isPlaywrightServiceWorkerError(reason)) {
+      console.warn(
+        "[openclaw] Suppressed Playwright service_worker CDP assertion (continuing):",
         formatUncaughtError(reason),
       );
       return;

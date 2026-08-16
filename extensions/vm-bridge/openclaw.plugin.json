@@ -1,0 +1,5 @@
+{
+  "id": "vm-bridge",
+  "name": "VM Bridge",
+  "description": "Bridge between the openclaw gateway and the local vm-claude dispatch system."
+}
