@@ -398,7 +398,14 @@ async function getAllPages(browser: Browser): Promise<Page[]> {
 async function pageTargetId(page: Page): Promise<string | null> {
   const session = await page.context().newCDPSession(page);
   try {
-    const info = (await session.send("Target.getTargetInfo")) as TargetInfoResponse;
+    // 3s timeout prevents indefinite hang on heavy login/captcha pages where
+    // newCDPSession() or Target.getTargetInfo blocks waiting for the page to settle.
+    const info = (await Promise.race([
+      session.send("Target.getTargetInfo"),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("pageTargetId timeout")), 3000),
+      ),
+    ])) as TargetInfoResponse;
     const targetId = String(info?.targetInfo?.targetId ?? "").trim();
     return targetId || null;
   } finally {
@@ -406,52 +413,10 @@ async function pageTargetId(page: Page): Promise<string | null> {
   }
 }
 
-function matchPageByTargetList(
-  pages: Page[],
-  targets: Array<{ id: string; url: string; title?: string }>,
-  targetId: string,
-): Page | null {
-  const target = targets.find((entry) => entry.id === targetId);
-  if (!target) {
-    return null;
-  }
-
-  const urlMatch = pages.filter((page) => page.url() === target.url);
-  if (urlMatch.length === 1) {
-    return urlMatch[0] ?? null;
-  }
-  if (urlMatch.length > 1) {
-    const sameUrlTargets = targets.filter((entry) => entry.url === target.url);
-    if (sameUrlTargets.length === urlMatch.length) {
-      const idx = sameUrlTargets.findIndex((entry) => entry.id === targetId);
-      if (idx >= 0 && idx < urlMatch.length) {
-        return urlMatch[idx] ?? null;
-      }
-    }
-  }
-  return null;
-}
-
-async function findPageByTargetIdViaTargetList(
-  pages: Page[],
-  targetId: string,
-  cdpUrl: string,
-): Promise<Page | null> {
-  const cdpHttpBase = normalizeCdpHttpBaseForJsonEndpoints(cdpUrl);
-  const targets = await fetchJson<
-    Array<{
-      id: string;
-      url: string;
-      title?: string;
-    }>
-  >(appendCdpPath(cdpHttpBase, "/json/list"), 2000);
-  return matchPageByTargetList(pages, targets, targetId);
-}
-
 async function findPageByTargetId(
   browser: Browser,
   targetId: string,
-  cdpUrl?: string,
+  _cdpUrl?: string,
 ): Promise<Page | null> {
   const pages = await getAllPages(browser);
   let resolvedViaCdp = false;
@@ -465,13 +430,6 @@ async function findPageByTargetId(
     }
     if (tid && tid === targetId) {
       return page;
-    }
-  }
-  if (cdpUrl) {
-    try {
-      return await findPageByTargetIdViaTargetList(pages, targetId, cdpUrl);
-    } catch {
-      // Ignore fetch errors and fall through to return null.
     }
   }
   if (!resolvedViaCdp && pages.length === 1) {
